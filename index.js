@@ -4,32 +4,10 @@ const context = canvas.getContext('2d')
 //canvas set up
 canvas.width = 1024
 canvas.height = 576
-
-//collisions setup
-const collisionsReshape = []
-while (collisions.length) collisionsReshape.push(collisions.splice(0, 70))
-
-class Boundary {
-
-    static width = 48
-    static height = 48
-
-    constructor({ position }) {
-        this.position = position
-        //original hieght of collision tile was 12 but multiply by 4 because map is zoomed in 400%
-        this.width = 48
-        this.height = 48
-    }
-
-    draw() {
-        context.fillStyle = 'rgba(255,0,0,0)'
-        context.fillRect(this.position.x, this.position.y, this.width, this.height)
-    }
-}
-
-const boundaries = []
 const offset = { x: -2100, y: -975 }
 
+//create player boundaries
+const boundaries = []
 collisionsReshape.forEach((row, i) => {
     row.forEach((tile, j) => {
         if (tile == 1025)
@@ -46,51 +24,56 @@ collisionsReshape.forEach((row, i) => {
 const mapImg = new Image()
 mapImg.src = './assets/map.png'
 
-//create player image
-const playerImg = new Image()
-playerImg.src = './assets/sprites/playerDown.png'
-
-class Sprite {
-    //pass through json so you don't have to remember the order in the constructor
-    constructor({ position, velocity, img, frames = { max: 1 } }) {
-        this.position = position
-        this.img = img
-        this.frames = frames
-
-        this.img.onload = () => {
-            this.width = this.img.width / this.frames.max
-            this.height = this.img.height
-        }
-
-    }
-
-    draw() {
-        context.drawImage(
-            this.img,
-            0, //x position to start crop
-            0, //y position to start crop
-            this.img.width / this.frames.max, // width of image crop
-            this.img.height, //height of imange crop
-            this.position.x, //x placement of image
-            this.position.y, //y placement of image
-            this.img.width / this.frames.max, //width of image
-            this.img.height) //height of image
-    }
-}
-
-// 
-// 
-
 const map = new Sprite({ position: { x: offset.x, y: offset.y }, img: mapImg })
+
+//create player image w/ sprites
+const playerImgDown = new Image()
+playerImgDown.src = './assets/sprites/playerDown.png'
+
+const playerImgUp = new Image()
+playerImgUp.src = './assets/sprites/playerUp.png'
+
+const playerImgLeft = new Image()
+playerImgLeft.src = './assets/sprites/playerLeft.png'
+
+const playerImgRight = new Image()
+playerImgRight.src = './assets/sprites/playerRight.png'
+
 const player = new Sprite({
     position: {
-        x: canvas.width / 2 - (playerImg.width / 4) / 2, //render image at x
-        y: canvas.height / 2 + playerImg.height / 2, //render image at y
+        x: canvas.width / 2 - (playerImgDown.width / 4) / 2, //render image at x
+        y: canvas.height / 2 + playerImgDown.height / 2, //render image at y
     },
-    img: playerImg,
-    frames: { max: 4 }
+    img: playerImgDown,
+    frames: { max: 4, stretch: { width: 1, height: 1 } },
+    sprites: {
+        down: playerImgDown,
+        up: playerImgUp,
+        left: playerImgLeft,
+        right: playerImgRight
+    }
 })
 
+//create foreground image
+const foregroundImg = new Image()
+foregroundImg.src = './assets/foreground.png'
+
+const foreground = new Sprite({ position: { x: offset.x, y: offset.y }, img: foregroundImg })
+
+//create battle zones
+const battleZones = []
+battleReshape.forEach((row, i) => {
+    row.forEach((tile, j) => {
+        if (tile == 1025) {
+            battleZones.push(new Boundary({
+                position: {
+                    x: j * Boundary.width + offset.x,
+                    y: i * Boundary.height + offset.y
+                }
+            }))
+        }
+    })
+})
 
 //animation
 
@@ -119,7 +102,7 @@ function spriteCollision({ sprite1, sprite2 }) {
     )
 }
 
-const moveables = [map, ...boundaries] // ... takes all items from array
+const moveables = [map, ...boundaries, foreground, ...battleZones] // ... takes all items from array
 function animatePlayer() {
     window.requestAnimationFrame(animatePlayer)
     map.draw()
@@ -129,11 +112,45 @@ function animatePlayer() {
 
     })
 
+    battleZones.forEach(zone => {
+        zone.draw()
+    })
+
     player.draw()
+    foreground.draw()
+
+    //detect in battle zone when button is pressed
+    if (keys.arrowDown.pressed || keys.arrowLeft.pressed || keys.arrowRight.pressed || keys.arrowUp.pressed) {
+
+        for (let i = 0; i < battleZones.length; i++) {
+            const zone = battleZones[i]
+            const overlap = (Math.min(player.position.x + player.width, zone.position.x + zone.width)
+                - Math.max(player.position.x, zone.position.x))
+                * (Math.min(player.position.y + player.height, zone.position.y + zone.height)
+                    - Math.max(player.position.y, zone.position.y))
+            if (
+                spriteCollision({
+                    sprite1: player,
+                    sprite2: zone
+                }) &&
+                overlap > (player.width * player.height) / 2 &&
+                Math.random() <= 0.05
+            ) {
+                console.log('possible battle!')
+                break
+            }
+        }
+    }
 
     let moving = true
+    player.moving = false
 
+    //moving down
     if (keys.arrowDown.pressed && lastKey == 'ArrowDown') {
+        player.moving = true
+        player.img = player.sprites.down
+
+        //detect boundary collision
         for (let i = 0; i < boundaries.length; i++) {
             const boundary = boundaries[i]
             if (
@@ -142,7 +159,7 @@ function animatePlayer() {
                     sprite2: {
                         ...boundary, position: {
                             x: boundary.position.x,
-                            y: boundary.position.y - 5
+                            y: boundary.position.y - 3
                         }
                     }
                 })) {
@@ -151,12 +168,18 @@ function animatePlayer() {
                 break
             }
         }
+
         if (moving) {
-            moveables.forEach(moveable => { moveable.position.y -= 5 })
+            moveables.forEach(moveable => { moveable.position.y -= 3 })
         }
 
     }
+    // moving up
     else if (keys.arrowUp.pressed && lastKey == 'ArrowUp') {
+        player.moving = true
+        player.img = player.sprites.up
+
+        //detect boundary collision
         for (let i = 0; i < boundaries.length; i++) {
             const boundary = boundaries[i]
             if (
@@ -165,7 +188,7 @@ function animatePlayer() {
                     sprite2: {
                         ...boundary, position: {
                             x: boundary.position.x,
-                            y: boundary.position.y + 5
+                            y: boundary.position.y + 3
                         }
                     }
                 })) {
@@ -174,12 +197,19 @@ function animatePlayer() {
                 break
             }
         }
+
+        //move if in motion
         if (moving) {
-            moveables.forEach(moveable => { moveable.position.y += 5 })
+            moveables.forEach(moveable => { moveable.position.y += 3 })
         }
 
     }
+    //moving left
     else if (keys.arrowLeft.pressed && lastKey == 'ArrowLeft') {
+        player.moving = true
+        player.img = player.sprites.left
+
+        //detect boundary collision
         for (let i = 0; i < boundaries.length; i++) {
             const boundary = boundaries[i]
             if (
@@ -187,7 +217,7 @@ function animatePlayer() {
                     sprite1: player,
                     sprite2: {
                         ...boundary, position: {
-                            x: boundary.position.x + 5,
+                            x: boundary.position.x + 3,
                             y: boundary.position.y
                         }
                     }
@@ -196,13 +226,21 @@ function animatePlayer() {
                 moving = false
                 break
             }
+
         }
+
+        // move map if in motion
         if (moving) {
-            moveables.forEach(moveable => { moveable.position.x += 5 })
+            moveables.forEach(moveable => { moveable.position.x += 3 })
         }
 
     }
+    // moving right
     else if (keys.arrowRight.pressed && lastKey == 'ArrowRight') {
+        player.moving = true
+        player.img = player.sprites.right
+
+        //detect boundary collision
         for (let i = 0; i < boundaries.length; i++) {
             const boundary = boundaries[i]
             if (
@@ -210,7 +248,7 @@ function animatePlayer() {
                     sprite1: player,
                     sprite2: {
                         ...boundary, position: {
-                            x: boundary.position.x - 5,
+                            x: boundary.position.x - 3,
                             y: boundary.position.y
                         }
                     }
@@ -220,8 +258,10 @@ function animatePlayer() {
                 break
             }
         }
+
+        // move map if in motion
         if (moving) {
-            moveables.forEach(moveable => { moveable.position.x -= 5 })
+            moveables.forEach(moveable => { moveable.position.x -= 3 })
         }
 
     }
